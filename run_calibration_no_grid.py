@@ -8,20 +8,6 @@ import sys
 import time
 from datetime import datetime as dt
 
-import numpy as np
-
-from system import (
-    MethodJ_GeometricDiversity,
-    FisheyeMethodJ,
-    get_video_info,
-    progress_callback,
-    show_chessboard_preview,
-    get_yes_no,
-    interactive_mode_no_grid,
-    DualLogger,
-)
-
-
 def main():
     """メインエントリーポイント（分割なし専用）"""
     import argparse
@@ -44,6 +30,7 @@ def main():
 
     # 引数がない場合は対話モードを実行
     if len(sys.argv) == 1:
+        from system import interactive_mode_no_grid
         interactive_mode_no_grid()
         return
 
@@ -72,8 +59,21 @@ def main():
 
     args = parser.parse_args()
 
+    from system import (
+        MethodJ_GeometricDiversity,
+        FisheyeMethodJ,
+        get_video_info,
+        progress_callback,
+        show_chessboard_preview,
+        get_yes_no,
+        DualLogger,
+    )
+
     # ロガー初期化
     logger = DualLogger()
+
+    if not args.video:
+        parser.error("動画ファイルを指定してください（例: python run_calibration_no_grid.py video.mp4）")
 
     # 動画存在確認
     if not os.path.exists(args.video):
@@ -163,6 +163,8 @@ def main():
 
     elapsed_time = time.time() - start_time
 
+    import numpy as np
+
     # 結果表示
     logger.log("\n" + "=" * 60)
     logger.log(f"キャリブレーション完了！（{lens_label}・分割なし）")
@@ -201,4 +203,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

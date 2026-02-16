@@ -131,15 +131,6 @@ def interactive_mode_no_grid():
     blur_threshold = get_user_input("ブレ判定の厳しさ (高いほど厳しい、80-200推奨)", default="120", value_type=float)
     logger.log(f"ブレ判定の厳しさ: {blur_threshold}")
 
-    # 分類段階設定（固定）
-    scale_bins = 2
-    tilt_bins = 3
-    roll_bins = 3
-    yaw_bins = 3
-
-    # グループあたりの最低枚数（固定）
-    min_frames_per_bin = 3
-
     # フレーム自動補完（有効）
     enable_k_center = True
 
@@ -292,7 +283,6 @@ def interactive_mode_no_grid():
     logger.log("=" * 60)
 
     return result
-
 
 
 
