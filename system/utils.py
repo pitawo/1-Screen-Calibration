@@ -8,6 +8,15 @@ import numpy as np
 from datetime import datetime as dt
 
 
+# ガンマ補正LUT（find_chessboard_corners_robust内で再利用）
+_GAMMA = 1.5
+_INV_GAMMA = 1.0 / _GAMMA
+_GAMMA_LUT = np.array(
+    [((i / 255.0) ** _INV_GAMMA) * 255 for i in np.arange(0, 256)],
+    dtype="uint8"
+)
+
+
 def get_video_info(video_path: str) -> dict:
     """動画の基本情報を取得"""
     cap = cv2.VideoCapture(video_path)
@@ -249,14 +258,10 @@ def find_chessboard_corners_robust(gray_image, pattern_size, flags=None):
         return True, corners
 
     # 4. ガンマ補正（暗い/明るすぎる場合）
-    gamma = 1.5  # 明るくする
-    invGamma = 1.0 / gamma
-    table = np.array([((i / 255.0) ** invGamma) * 255 for i in np.arange(0, 256)]).astype("uint8")
-    gray_gamma = cv2.LUT(gray_image, table)
+    gray_gamma = cv2.LUT(gray_image, _GAMMA_LUT)
     
     ret, corners = cv2.findChessboardCorners(gray_gamma, pattern_size, flags=flags)
     if ret:
         return True, corners
 
     return False, None
-
