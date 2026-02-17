@@ -278,7 +278,28 @@ def _interpolate_charuco_corners(marker_corners, marker_ids, image, board):
         )
 
     detector = cv2.aruco.CharucoDetector(board)
-    charuco_corners, charuco_ids, _, _ = detector.detectBoard(image, marker_corners, marker_ids)
+    # OpenCV 4.13 では detectBoard の第2・第3引数が
+    # charucoCorners/charucoIds (出力バッファ) として解釈されるため、
+    # markerCorners/markerIds はキーワード引数で明示する。
+    try:
+        detection = detector.detectBoard(
+            image,
+            markerCorners=marker_corners,
+            markerIds=marker_ids,
+        )
+    except cv2.error:
+        # 互換性のため旧バインディング向けの呼び出しも試す
+        detection = detector.detectBoard(image, marker_corners, marker_ids)
+
+    if not isinstance(detection, tuple):
+        return 0, None, None
+
+    # OpenCVのビルド/バインディング差異で戻り値の要素数が異なるため吸収する
+    if len(detection) >= 2:
+        charuco_corners, charuco_ids = detection[0], detection[1]
+    else:
+        return 0, None, None
+
     ret_charuco = 0 if charuco_ids is None else len(charuco_ids)
     return ret_charuco, charuco_corners, charuco_ids
 
