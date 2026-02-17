@@ -81,7 +81,7 @@ class MethodJ_GeometricDiversity(BaseCalibrator):
         blur_score = self._compute_blur_score(gray)
 
         # ロバストなCharuco検出を使用
-        ret_corners, corners_refined, corner_ids, _ = find_charuco_corners_robust(
+        ret_corners, corners_refined, corner_ids, marker_detection = find_charuco_corners_robust(
             gray, self.charuco_board, self.aruco_dict
         )
         if not ret_corners:
@@ -165,6 +165,8 @@ class MethodJ_GeometricDiversity(BaseCalibrator):
         # アスペクト比のズレ（=傾きの大きさ）
         slant_score = abs(observed_aspect - expected_aspect)
 
+        detected_marker_ids = self._extract_detected_marker_ids(marker_detection)
+
         return {
             'frame_idx': frame_idx,
             'objp': objp,
@@ -181,8 +183,62 @@ class MethodJ_GeometricDiversity(BaseCalibrator):
             'reprojection_error': None, # Step 3削除により未計算
             'tilt_angle': None, # 削除
             'roll_angle': None, # 削除
-            'yaw_angle': None   # 削除
+            'yaw_angle': None,   # 削除
+            'charuco_corner_count': int(len(corner_ids)),
+            'charuco_corner_ids': corner_ids.flatten().astype(int).tolist(),
+            'aruco_marker_ids': detected_marker_ids
         }
+
+    @staticmethod
+    def _extract_detected_marker_ids(marker_detection):
+        if not (isinstance(marker_detection, tuple) and len(marker_detection) == 2):
+            return []
+
+        marker_corners, marker_ids = marker_detection
+        if marker_ids is None or marker_corners is None or len(marker_corners) != len(marker_ids):
+            return []
+
+        return sorted(int(marker_id) for marker_id in np.asarray(marker_ids).flatten())
+
+    def _log_charuco_detection_coverage(self, detections):
+        if not detections:
+            return
+
+        total_charuco_ids = int(len(self.objp_template))
+        corner_counts = np.asarray([d.get('charuco_corner_count', 0) for d in detections], dtype=np.int32)
+        unique_charuco_ids = sorted({
+            int(corner_id)
+            for d in detections
+            for corner_id in d.get('charuco_corner_ids', [])
+        })
+
+        coverage_ratio = (len(unique_charuco_ids) / total_charuco_ids * 100.0) if total_charuco_ids > 0 else 0.0
+        self._log(f"Charuco IDカバレッジ: {len(unique_charuco_ids)}/{total_charuco_ids} ({coverage_ratio:.1f}%)")
+        self._log(
+            f"1フレームあたりCharucoコーナー数: 平均={np.mean(corner_counts):.1f}, "
+            f"中央値={np.median(corner_counts):.1f}, 最小={np.min(corner_counts)}, 最大={np.max(corner_counts)}"
+        )
+
+        board_marker_ids = []
+        if hasattr(self.charuco_board, "getIds"):
+            marker_ids = self.charuco_board.getIds()
+            if marker_ids is not None:
+                board_marker_ids = sorted(int(mid) for mid in np.asarray(marker_ids).flatten())
+        elif hasattr(self.charuco_board, "ids"):
+            marker_ids = self.charuco_board.ids
+            if marker_ids is not None:
+                board_marker_ids = sorted(int(mid) for mid in np.asarray(marker_ids).flatten())
+
+        if board_marker_ids:
+            unique_marker_ids = sorted({
+                int(marker_id)
+                for d in detections
+                for marker_id in d.get('aruco_marker_ids', [])
+            })
+            marker_coverage = len(unique_marker_ids) / len(board_marker_ids) * 100.0
+            missing_marker_ids = [mid for mid in board_marker_ids if mid not in unique_marker_ids]
+            self._log(f"ArUco IDカバレッジ: {len(unique_marker_ids)}/{len(board_marker_ids)} ({marker_coverage:.1f}%)")
+            self._log(f"未検出ArUco ID: {missing_marker_ids if missing_marker_ids else 'なし'}")
 
     def _k_center_greedy(self, features, k):
         """k-center法で多様性を最大化するサンプルを選択"""
@@ -275,6 +331,8 @@ class MethodJ_GeometricDiversity(BaseCalibrator):
 
         if len(all_detections) == 0:
             raise ValueError("Charucoボードが検出されたフレームがありません")
+
+        self._log_charuco_detection_coverage(all_detections)
 
         # ブレ除外
         blur_scores = np.asarray([d['blur_score'] for d in all_detections], dtype=np.float32)
