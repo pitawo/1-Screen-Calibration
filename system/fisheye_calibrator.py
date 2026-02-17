@@ -571,7 +571,7 @@ class FisheyeMethodJ(FisheyeCalibrator):
         self.process_log = []
         t_total_start = time.time()
         self._log("=" * 60)
-        self._log("魚眼レンズ 高精度自動キャリブレーション 開始")
+        self._log("魚眼レンズ キャリブレーション 開始")
         self._log("=" * 60)
 
         if progress_callback:
@@ -633,26 +633,28 @@ class FisheyeMethodJ(FisheyeCalibrator):
         sharp_detections = [d for d in all_detections if d['blur_score'] >= self.blur_threshold]
         blurred_count = len(all_detections) - len(sharp_detections)
         self._log(f"ブレ除外: {len(sharp_detections)}フレーム残存（{blurred_count}フレーム除外）")
-        del all_detections  # メモリ解放
 
         if len(sharp_detections) == 0:
             self._log(f"警告: 指定されたブレ基準（{self.blur_threshold}）を満たすフレームがありませんが、")
-            self._log(f"チェスボード検出には成功しているため、検出された全フレームを使用します。（頑健検出モード）")
+            self._log("チェスボード検出には成功しているため、検出された全フレームを使用します。（頑健検出モード）")
             sharp_detections = all_detections
             
         elif len(sharp_detections) < self.min_frames_per_bin * 5: # 極端に少ない場合も救済
              self._log(f"警告: ブレ基準を満たすフレームが少なすぎます（{len(sharp_detections)}枚）。")
-             self._log(f"検出された全フレームを候補として使用します。")
+             self._log("検出された全フレームを候補として使用します。")
              sharp_detections = all_detections
 
+        del all_detections  # メモリ解放
+
         if len(sharp_detections) == 0:
-            raise ValueError(f"チェスボードが検出できませんでした（検出数 0）")
+            raise ValueError("チェスボードが検出できませんでした（検出数 0）")
 
         if progress_callback:
             progress_callback(f"{len(sharp_detections)}フレームがブレ判定を通過", 30)
 
-        # ステップ5: フレーム選択（2D特徴量 + k-center法）
-        self._log("--- ステップ5: フレーム選択（2D特徴量 + k-center法） ---")
+        # ステップ2: フレーム選択（2D特徴量 + k-center法）
+        t_step2_start = time.time()
+        self._log("--- ステップ2: フレーム選択（2D特徴量 + k-center法） ---")
         if progress_callback:
             progress_callback("フレーム選択中...", 40)
 
@@ -703,22 +705,21 @@ class FisheyeMethodJ(FisheyeCalibrator):
 
             
         # bin_id エラー回避: ダミー値をセット
-        for f in selected:
+        for f in selected_frames:
              f['bin_id'] = 'all'
              
         # ダミーのbin_countsを作成（互換性のため）
-        bin_counts = {'all': selected}
+        bin_counts = {'all': selected_frames}
 
-        selected_frames = selected
-        t_step5_elapsed = time.time() - t_step3_elapsed # Re-evaluate time for simplified step 5
-        self._log(f"ステップ5 所要時間: {t_step5_elapsed:.1f}秒")
+        t_step2_elapsed = time.time() - t_step2_start
+        self._log(f"ステップ2 所要時間: {t_step2_elapsed:.1f}秒")
 
         if progress_callback:
             progress_callback("フレーム選択完了", 90)
 
-        # ステップ6: 最終キャリブレーション（魚眼）
-        t_step6_start = time.time()
-        self._log("--- ステップ6: 最終キャリブレーション（魚眼モデル） ---")
+        # ステップ3: 最終キャリブレーション（魚眼）
+        t_step3_start = time.time()
+        self._log("--- ステップ3: 最終キャリブレーション（魚眼モデル） ---")
         if progress_callback:
             progress_callback("最終キャリブレーション実行中（魚眼）...", 92)
 
@@ -730,27 +731,23 @@ class FisheyeMethodJ(FisheyeCalibrator):
             selected_frames, bin_counts
         )
 
-        t_step6_elapsed = time.time() - t_step6_start
-        self._log(f"ステップ6 所要時間: {t_step6_elapsed:.1f}秒")
+        t_step3_elapsed = time.time() - t_step3_start
+        self._log(f"ステップ3 所要時間: {t_step3_elapsed:.1f}秒")
 
         t_total_elapsed = time.time() - t_total_start
         self._log("=" * 60)
-        self._log(f"解析時間の内訳:")
+        self._log("解析時間の内訳:")
         self._log(f"  ステップ1 フレーム検出:       {t_step1_elapsed:>8.1f}秒")
-        self._log(f"  ステップ2 初期キャリブレーション: {t_step2_elapsed:>8.1f}秒")
-        self._log(f"  ステップ3 フレーム再評価:      {t_step3_elapsed:>8.1f}秒")
-        self._log(f"  ステップ5 フレーム選択:        {t_step5_elapsed:>8.1f}秒")
-        self._log(f"  ステップ6 最終キャリブレーション: {t_step6_elapsed:>8.1f}秒")
+        self._log(f"  ステップ2 フレーム選択:        {t_step2_elapsed:>8.1f}秒")
+        self._log(f"  ステップ3 最終キャリブレーション: {t_step3_elapsed:>8.1f}秒")
         self._log(f"  合計:                        {t_total_elapsed:>8.1f}秒 ({t_total_elapsed/60:.1f}分)")
         self._log("=" * 60)
 
         result['process_log'] = self.process_log
         result['elapsed_time'] = {
             'step1_detection': round(t_step1_elapsed, 1),
-            'step2_initial_calibration': round(t_step2_elapsed, 1),
-            'step3_re_evaluation': round(t_step3_elapsed, 1),
-            'step5_frame_selection': round(t_step5_elapsed, 1),
-            'step6_final_calibration': round(t_step6_elapsed, 1),
+            'step2_frame_selection': round(t_step2_elapsed, 1),
+            'step3_final_calibration': round(t_step3_elapsed, 1),
             'total': round(t_total_elapsed, 1)
         }
 
@@ -763,13 +760,44 @@ class FisheyeMethodJ(FisheyeCalibrator):
                                        selected_frames, bin_counts):
         """最終キャリブレーション処理（魚眼）"""
         # キャリブレーション用フレーム数を制限（cv2.fisheye.calibrateは大量フレームで極端に遅い）
+        # 単純な等間隔抽出だけだと高品質フレームを取りこぼす可能性があるため、
+        # 品質優先 + 時間方向の分散を両立するサンプリングにする。
         max_calib_frames = 80
         if len(objpoints) > max_calib_frames:
-            step = len(objpoints) / max_calib_frames
-            indices = [int(i * step) for i in range(max_calib_frames)]
+            quality_ratio = 0.7
+            quality_count = int(max_calib_frames * quality_ratio)
+            diversity_count = max_calib_frames - quality_count
+
+            scored = list(enumerate(selected_frames))
+            top_quality = sorted(
+                scored,
+                key=lambda x: x[1].get('quality_score', 0.0),
+                reverse=True
+            )[:quality_count]
+            selected_idx_set = {idx for idx, _ in top_quality}
+
+            if diversity_count > 0:
+                step = len(objpoints) / diversity_count
+                uniform_indices = [min(int(i * step), len(objpoints) - 1) for i in range(diversity_count)]
+                selected_idx_set.update(uniform_indices)
+
+            indices = sorted(selected_idx_set)
+            if len(indices) > max_calib_frames:
+                indices = indices[:max_calib_frames]
+            elif len(indices) < max_calib_frames:
+                for idx in range(len(objpoints)):
+                    if idx not in selected_idx_set:
+                        indices.append(idx)
+                        if len(indices) == max_calib_frames:
+                            break
+
             calib_obj = [objpoints[i] for i in indices]
             calib_img = [imgpoints[i] for i in indices]
-            self._log(f"最終キャリブレーション実行（魚眼モデル、{len(objpoints)}フレーム中{len(calib_obj)}枚を使用）")
+            self._log(f"最終キャリブレーション実行（魚眼モデル、候補{len(objpoints)}フレーム、上限{max_calib_frames}枚）")
+            self._log(
+                f"採用基準: 計算時間と安定性のバランスのため最大{max_calib_frames}枚。"
+                f"超過時は品質上位{quality_count}枚 + 時系列の均等サンプル{len(calib_obj)-quality_count}枚を併用"
+            )
         else:
             calib_obj = objpoints
             calib_img = imgpoints
