@@ -39,7 +39,7 @@ def progress_callback(message, progress_percent=None):
         print(f"[{timestamp}] {message}")
 
 
-def show_charuco_preview(video_path: str, rows: int, cols: int, square_size: float = 0.03, marker_size: float = 0.015, dictionary_name: str = "DICT_5X5_100", output_dir: str = None) -> bool:
+def show_charuco_preview(video_path: str, rows: int, cols: int, square_size: float = 0.03, marker_size: float = 0.015, dictionary_name: str = "DICT_5X5_100", output_dir: str = None, expected_marker_ids=None) -> bool:
     """
     Charucoボード検出プレビュー（画像ファイル保存方式）
 
@@ -48,6 +48,7 @@ def show_charuco_preview(video_path: str, rows: int, cols: int, square_size: flo
         rows: Charucoボード行数（マス数）
         cols: Charucoボード列数（マス数）
         output_dir: プレビュー画像の保存先
+        expected_marker_ids: 期待するArUcoマーカーID一覧（未指定時は0〜16）
 
     Returns:
         bool: 検出成功したかどうか
@@ -73,6 +74,11 @@ def show_charuco_preview(video_path: str, rows: int, cols: int, square_size: flo
     else:
         board = cv2.aruco.CharucoBoard_create(cols, rows, square_size, marker_size, aruco_dict)
 
+    board_marker_ids = _get_charuco_board_marker_ids(board)
+    expected_marker_ids = _normalize_marker_id_list(expected_marker_ids)
+    if not expected_marker_ids:
+        expected_marker_ids = list(range(17))
+
     print("\n" + "=" * 60)
     print("Charucoボード検出プレビュー")
     print("=" * 60)
@@ -88,6 +94,9 @@ def show_charuco_preview(video_path: str, rows: int, cols: int, square_size: flo
     sample_frames = list(range(0, total_frames, sample_interval))[:10]
 
     print(f"\n{len(sample_frames)}フレームをサンプリングして検出テスト中...")
+    print(f"期待Marker ID: {expected_marker_ids}")
+    if board_marker_ids:
+        print(f"ボード定義Marker ID: {board_marker_ids}")
 
     detected_count = 0
 
@@ -99,7 +108,14 @@ def show_charuco_preview(video_path: str, rows: int, cols: int, square_size: flo
             continue
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        ret_corners, corners, ids, marker_corners = find_charuco_corners_robust(gray, board, aruco_dict)
+        ret_corners, corners, ids, marker_detection = find_charuco_corners_robust(gray, board, aruco_dict)
+
+        marker_corners, marker_ids = (None, None)
+        if isinstance(marker_detection, tuple) and len(marker_detection) == 2:
+            marker_corners, marker_ids = marker_detection
+        elif marker_detection is not None:
+            # 旧戻り値（marker_cornersのみ）との互換
+            marker_corners = marker_detection
 
         display_frame = frame.copy()
 
@@ -108,8 +124,8 @@ def show_charuco_preview(video_path: str, rows: int, cols: int, square_size: flo
         blur_score = laplacian.var()
 
         if ret_corners:
-            if ids is not None and marker_corners is not None:
-                cv2.aruco.drawDetectedMarkers(display_frame, marker_corners, ids)
+            if marker_ids is not None and marker_corners is not None and len(marker_corners) == len(marker_ids):
+                cv2.aruco.drawDetectedMarkers(display_frame, marker_corners, marker_ids)
             cv2.aruco.drawDetectedCornersCharuco(display_frame, corners, ids, (255, 0, 0))
 
             status_text = f"DETECTED | Charuco: {len(ids)} | Blur: {blur_score:.1f}"
@@ -133,6 +149,14 @@ def show_charuco_preview(video_path: str, rows: int, cols: int, square_size: flo
         cv2.imwrite(filepath, display_frame)
 
         print(f"  [{i+1}/{len(sample_frames)}] Frame {frame_idx}: {status} (Blur: {blur_score:.1f})")
+
+        detected_marker_ids = []
+        if marker_ids is not None and marker_corners is not None and len(marker_corners) == len(marker_ids):
+            detected_marker_ids = sorted(int(marker_id) for marker_id in np.asarray(marker_ids).flatten())
+
+        missing_marker_ids = [marker_id for marker_id in expected_marker_ids if marker_id not in detected_marker_ids]
+        print(f"      検出Marker ID: {detected_marker_ids if detected_marker_ids else 'なし'}")
+        print(f"      不検出Marker ID: {missing_marker_ids if missing_marker_ids else 'なし'}")
 
     cap.release()
 
@@ -252,9 +276,36 @@ def find_charuco_corners_robust(gray_image, charuco_board, aruco_dict, detector_
             board=charuco_board,
         )
         if ret_charuco and charuco_ids is not None and len(charuco_ids) >= min_corners:
-            return True, charuco_corners, charuco_ids, marker_corners
+            return True, charuco_corners, charuco_ids, (marker_corners, marker_ids)
 
     return False, None, None, None
+
+
+def _get_charuco_board_marker_ids(board):
+    """Charucoボードに含まれるArUcoマーカーID一覧を取得（OpenCV差異を吸収）。"""
+    ids = None
+
+    if hasattr(board, "getIds"):
+        ids = board.getIds()
+    elif hasattr(board, "ids"):
+        ids = board.ids
+
+    if ids is None:
+        return []
+
+    return sorted(int(marker_id) for marker_id in np.asarray(ids).flatten())
+
+
+def _normalize_marker_id_list(marker_ids):
+    """Marker IDリストをソート済み整数リストへ正規化。"""
+    if marker_ids is None:
+        return []
+
+    try:
+        normalized = sorted({int(marker_id) for marker_id in np.asarray(marker_ids).flatten()})
+    except (TypeError, ValueError):
+        return []
+    return normalized
 
 
 def _detect_markers(image, aruco_dict, detector_params):
