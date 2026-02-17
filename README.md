@@ -51,14 +51,14 @@ python run_calibration_no_grid.py
 ### コマンドラインモード
 
 ```bash
-# 通常レンズ（デフォルト設定: rows=5, cols=7, square=0.03, marker=0.015, DICT_5X5_100）
+# 通常レンズ（デフォルト設定: rows=7, cols=5, square=0.03, marker=0.015, DICT_5X5_100）
 python run_calibration_no_grid.py 動画ファイル.mp4
 
 # 魚眼レンズ（GoPro等）
 python run_calibration_no_grid.py 動画ファイル.mp4 --fisheye
 
 # Charucoボードパラメータを明示的に指定
-python run_calibration_no_grid.py 動画ファイル.mp4 --rows 5 --cols 7 --square_size 0.03 --marker_size 0.015 --dictionary DICT_5X5_100
+python run_calibration_no_grid.py 動画ファイル.mp4 --rows 7 --cols 5 --square_size 0.03 --marker_size 0.015 --dictionary DICT_5X5_100
 ```
 
 ### オプション一覧
@@ -66,8 +66,8 @@ python run_calibration_no_grid.py 動画ファイル.mp4 --rows 5 --cols 7 --squ
 | オプション | 短縮形 | デフォルト | 説明 |
 |-----------|--------|-----------|------|
 | `--output_dir` | `-o` | `./output` | 出力ディレクトリ |
-| `--rows` | - | 5 | Charucoボード行数（マス数） |
-| `--cols` | - | 7 | Charucoボード列数（マス数） |
+| `--rows` | - | 7 | Charucoボード行数（マス数） |
+| `--cols` | - | 5 | Charucoボード列数（マス数） |
 | `--square_size` | - | 0.03 | マスのサイズ [m] |
 | `--marker_size` | - | 0.015 | ArUcoマーカーサイズ [m] |
 | `--dictionary` | - | DICT_5X5_100 | ArUco辞書名 |

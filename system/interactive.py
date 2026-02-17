@@ -86,10 +86,10 @@ def interactive_mode_no_grid():
     logger.log("-" * 40)
     logger.log("※ ボードのマス数を入力してください")
 
-    rows = get_user_input("行数（マス数）", default="5", value_type=int)
+    rows = get_user_input("行数（マス数）", default="7", value_type=int)
     logger.log(f"行数（マス数）: {rows}")
 
-    cols = get_user_input("列数（マス数）", default="7", value_type=int)
+    cols = get_user_input("列数（マス数）", default="5", value_type=int)
     logger.log(f"列数（マス数）: {cols}")
 
     square_size = get_user_input("マスのサイズ [m]", default="0.03", value_type=float)

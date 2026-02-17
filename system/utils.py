@@ -241,13 +241,13 @@ def find_charuco_corners_robust(gray_image, charuco_board, aruco_dict, detector_
     candidate_images.append(cv2.LUT(gray_image, _GAMMA_LUT))
 
     for candidate in candidate_images:
-        marker_corners, marker_ids, _ = cv2.aruco.detectMarkers(candidate, aruco_dict, parameters=detector_params)
+        marker_corners, marker_ids, _ = _detect_markers(candidate, aruco_dict, detector_params)
         if marker_ids is None or len(marker_ids) == 0:
             continue
 
-        ret_charuco, charuco_corners, charuco_ids = cv2.aruco.interpolateCornersCharuco(
-            markerCorners=marker_corners,
-            markerIds=marker_ids,
+        ret_charuco, charuco_corners, charuco_ids = _interpolate_charuco_corners(
+            marker_corners=marker_corners,
+            marker_ids=marker_ids,
             image=candidate,
             board=charuco_board,
         )
@@ -255,6 +255,61 @@ def find_charuco_corners_robust(gray_image, charuco_board, aruco_dict, detector_
             return True, charuco_corners, charuco_ids, marker_corners
 
     return False, None, None, None
+
+
+def _detect_markers(image, aruco_dict, detector_params):
+    """OpenCVのバージョン差異を吸収してArUcoマーカーを検出する。"""
+    if hasattr(cv2.aruco, "detectMarkers"):
+        return cv2.aruco.detectMarkers(image, aruco_dict, parameters=detector_params)
+
+    detector = cv2.aruco.ArucoDetector(aruco_dict, detector_params)
+    marker_corners, marker_ids, rejected = detector.detectMarkers(image)
+    return marker_corners, marker_ids, rejected
+
+
+def _interpolate_charuco_corners(marker_corners, marker_ids, image, board):
+    """OpenCVのバージョン差異を吸収してCharucoコーナーを補間する。"""
+    if hasattr(cv2.aruco, "interpolateCornersCharuco"):
+        return cv2.aruco.interpolateCornersCharuco(
+            markerCorners=marker_corners,
+            markerIds=marker_ids,
+            image=image,
+            board=board,
+        )
+
+    detector = cv2.aruco.CharucoDetector(board)
+
+    # OpenCVのPythonバインディング差異に対応するため、複数シグネチャを順番に試す。
+    # 4.13系では位置引数が charucoCorners と解釈されエラーになるケースがある。
+    result = None
+    for call in (
+        lambda: detector.detectBoard(image, markerCorners=marker_corners, markerIds=marker_ids),
+        lambda: detector.detectBoard(
+            image,
+            charucoCorners=None,
+            charucoIds=None,
+            markerCorners=marker_corners,
+            markerIds=marker_ids,
+        ),
+        lambda: detector.detectBoard(image, None, None, marker_corners, marker_ids),
+        lambda: detector.detectBoard(image),
+    ):
+        try:
+            result = call()
+            break
+        except (cv2.error, TypeError):
+            continue
+
+    if isinstance(result, tuple):
+        if len(result) >= 2:
+            charuco_corners, charuco_ids = result[0], result[1]
+        else:
+            charuco_corners, charuco_ids = None, None
+    else:
+        charuco_corners, charuco_ids = None, None
+
+    ret_charuco = 0 if charuco_ids is None else len(charuco_ids)
+    return ret_charuco, charuco_corners, charuco_ids
 
 
 def show_chessboard_preview(*args, **kwargs):
