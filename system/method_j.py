@@ -10,7 +10,7 @@ import cv2
 import numpy as np
 
 from .base_calibrator import BaseCalibrator
-from .utils import find_chessboard_corners_robust, DualLogger
+from .utils import find_charuco_corners_robust, DualLogger
 
 
 class MethodJ_GeometricDiversity(BaseCalibrator):
@@ -23,13 +23,15 @@ class MethodJ_GeometricDiversity(BaseCalibrator):
         checkerboard_rows: int,
         checkerboard_cols: int,
         square_size: float,
+        marker_size: float = 0.015,
+        dictionary_name: str = "DICT_5X5_100",
         target_frame_count: int = 200,
         blur_threshold: float = 120.0,
         enable_k_center: bool = True,
         frame_skip: int = 1,
         logger: Optional[DualLogger] = None
     ):
-        super().__init__(checkerboard_rows, checkerboard_cols, square_size)
+        super().__init__(checkerboard_rows, checkerboard_cols, square_size, marker_size, dictionary_name)
         self.target_frame_count = max(1, int(target_frame_count))
         self.blur_threshold = blur_threshold
         self.enable_k_center = enable_k_center
@@ -37,7 +39,6 @@ class MethodJ_GeometricDiversity(BaseCalibrator):
         self.logger = logger
         self.min_frames_per_bin = 3
         self.max_reflection_ratio = 0.12
-        self.objp_reshaped = self.objp_template.reshape(-1, 1, 3)
         self.process_log = []
 
     def _log(self, message: str):
@@ -74,21 +75,19 @@ class MethodJ_GeometricDiversity(BaseCalibrator):
 
     def detect_and_evaluate_frame(self, args):
         """フレーム検出と評価（Method J用: 2D特徴量ベース）"""
-        frame_idx, frame, pattern_size, img_width, img_height, img_diag = args
+        frame_idx, frame, img_width, img_height, img_diag = args
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
         blur_score = self._compute_blur_score(gray)
 
-        # ロバスト検出を使用
-        ret_corners, corners = find_chessboard_corners_robust(
-            gray, pattern_size, flags=self.chess_flags
+        # ロバストなCharuco検出を使用
+        ret_corners, corners_refined, corner_ids, _ = find_charuco_corners_robust(
+            gray, self.charuco_board, self.aruco_dict
         )
         if not ret_corners:
             return None
 
-        corners_refined = cv2.cornerSubPix(
-            gray, corners, (11, 11), (-1, -1), self.subpix_criteria
-        )
+        objp = self.objp_template[corner_ids.flatten()].reshape(-1, 1, 3)
 
         # 基本特徴量
         center_x = np.mean(corners_refined[:, 0, 0]) / img_width
@@ -101,7 +100,7 @@ class MethodJ_GeometricDiversity(BaseCalibrator):
         board_diag = math.hypot(board_width, board_height)
         scale = board_diag / img_diag
 
-        # 反射（白飛び）推定: チェスボード領域近傍の高輝度割合
+        # 反射（白飛び）推定: Charucoボード領域近傍の高輝度割合
         pad = 10
         x_min = max(0, int(np.min(x_coords)) - pad)
         x_max = min(img_width, int(np.max(x_coords)) + pad)
@@ -113,10 +112,15 @@ class MethodJ_GeometricDiversity(BaseCalibrator):
             reflection_ratio = float(np.mean(roi >= 245))
 
         # コーナー配置一貫性: 行列方向の間隔CV（低いほど安定）
-        corners_grid = corners_refined.reshape(self.checkerboard_rows, self.checkerboard_cols, 2)
-        h_diffs = np.linalg.norm(corners_grid[:, 1:, :] - corners_grid[:, :-1, :], axis=2).ravel()
-        v_diffs = np.linalg.norm(corners_grid[1:, :, :] - corners_grid[:-1, :, :], axis=2).ravel()
-        spacing = np.concatenate([h_diffs, v_diffs])
+        points2d = corners_refined[:, 0, :]
+        spacing = []
+        if len(points2d) > 1:
+            for i in range(len(points2d)):
+                d = np.linalg.norm(points2d - points2d[i], axis=1)
+                d = d[d > 1e-6]
+                if d.size > 0:
+                    spacing.append(np.min(d))
+        spacing = np.asarray(spacing, dtype=np.float32)
         spacing_mean = float(np.mean(spacing)) if spacing.size > 0 else 0.0
         spacing_std = float(np.std(spacing)) if spacing.size > 0 else 0.0
         spacing_cv = spacing_std / (spacing_mean + 1e-6)
@@ -143,7 +147,7 @@ class MethodJ_GeometricDiversity(BaseCalibrator):
 
         # 2. スラント（傾き）の簡易指標
         # 想定アスペクト比と観測アスペクト比の乖離を利用
-        # チェスボードの物理的なアスペクト比
+        # Charucoボードの物理的なアスペクト比
         min_board_side = min(self.checkerboard_rows - 1, self.checkerboard_cols - 1)
         if min_board_side <= 0:
             expected_aspect = 1.0
@@ -163,8 +167,8 @@ class MethodJ_GeometricDiversity(BaseCalibrator):
 
         return {
             'frame_idx': frame_idx,
-            'objp': self.objp_reshaped,
-            'imgp': corners_refined,
+            'objp': objp,
+            'imgp': corners_refined.reshape(-1, 1, 2),
             'quality_score': quality_score,
             'blur_score': blur_score,
             'center_u': center_x,
@@ -232,7 +236,6 @@ class MethodJ_GeometricDiversity(BaseCalibrator):
         cap.release()
 
         img_diag = math.sqrt(img_width**2 + img_height**2)
-        pattern_size = (self.checkerboard_cols, self.checkerboard_rows)
         img_size = (img_width, img_height)
 
         process_count = len(range(0, total_frames, self.frame_skip))
@@ -258,7 +261,7 @@ class MethodJ_GeometricDiversity(BaseCalibrator):
                 continue
 
             result = self.detect_and_evaluate_frame(
-                (idx, frame, pattern_size, img_width, img_height, img_diag)
+                (idx, frame, img_width, img_height, img_diag)
             )
             if result is not None:
                 all_detections.append(result)
@@ -271,7 +274,7 @@ class MethodJ_GeometricDiversity(BaseCalibrator):
         self._log(f"検出成功: {len(all_detections)}/{process_count}フレーム ({len(all_detections)/max(process_count,1)*100:.1f}%)")
 
         if len(all_detections) == 0:
-            raise ValueError("チェスボードが検出されたフレームがありません")
+            raise ValueError("Charucoボードが検出されたフレームがありません")
 
         # ブレ除外
         blur_scores = np.asarray([d['blur_score'] for d in all_detections], dtype=np.float32)
@@ -299,7 +302,7 @@ class MethodJ_GeometricDiversity(BaseCalibrator):
 
         if len(sharp_detections) == 0:
             self._log(f"警告: 指定されたブレ基準（{self.blur_threshold}）を満たすフレームがありませんが、")
-            self._log("チェスボード検出には成功しているため、検出された全フレームを使用します。（頑健検出モード）")
+            self._log("Charucoボード検出には成功しているため、検出された全フレームを使用します。（頑健検出モード）")
             sharp_detections = all_detections
             effective_blur_threshold = float(np.min(blur_scores))
             
@@ -311,7 +314,7 @@ class MethodJ_GeometricDiversity(BaseCalibrator):
 
         del all_detections  # ここ以降は sharp_detections のみ使用
         if len(sharp_detections) == 0:
-             raise ValueError("チェスボードが検出できませんでした（検出数 0）")
+             raise ValueError("Charucoボードが検出できませんでした（検出数 0）")
 
         # 品質下位フレームを除外（ただし候補数を減らしすぎない）
         if len(sharp_detections) > self.target_frame_count:
@@ -600,6 +603,8 @@ class MethodJ_GeometricDiversity(BaseCalibrator):
             'image_size': np.array([w, h]),
             'board_shape': np.array([self.checkerboard_rows, self.checkerboard_cols]),
             'square_size': self.square_size,
+            'marker_size': self.marker_size,
+            'aruco_dictionary': self.dictionary_name,
             'calib_flags': int(self.chess_flags),
             'per_view_errors': pv_errs,
             'calib_date': datetime.datetime.now().strftime("%Y-%m-%d"),

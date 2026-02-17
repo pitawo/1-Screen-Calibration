@@ -17,20 +17,38 @@ class BaseCalibrator:
         self,
         checkerboard_rows: int,
         checkerboard_cols: int,
-        square_size: float
+        square_size: float,
+        marker_size: float = 0.015,
+        dictionary_name: str = "DICT_5X5_100"
     ):
         self.checkerboard_rows = checkerboard_rows
         self.checkerboard_cols = checkerboard_cols
         self.square_size = square_size
+        self.marker_size = marker_size
+        self.dictionary_name = dictionary_name
 
-        self.objp_template = np.zeros(
-            (checkerboard_rows * checkerboard_cols, 3),
-            np.float32
-        )
-        self.objp_template[:, :2] = np.mgrid[
-            0:checkerboard_cols,
-            0:checkerboard_rows
-        ].T.reshape(-1, 2) * square_size
+        if not hasattr(cv2, "aruco"):
+            raise RuntimeError("OpenCV ArUco モジュールが利用できません。opencv-contrib-python をインストールしてください。")
+        if not hasattr(cv2.aruco, dictionary_name):
+            raise ValueError(f"未対応のArUco辞書: {dictionary_name}")
+
+        self.aruco_dict = cv2.aruco.getPredefinedDictionary(getattr(cv2.aruco, dictionary_name))
+        if hasattr(cv2.aruco, "CharucoBoard"):
+            self.charuco_board = cv2.aruco.CharucoBoard(
+                (checkerboard_cols, checkerboard_rows),
+                square_size,
+                marker_size,
+                self.aruco_dict,
+            )
+        else:
+            self.charuco_board = cv2.aruco.CharucoBoard_create(
+                checkerboard_cols,
+                checkerboard_rows,
+                square_size,
+                marker_size,
+                self.aruco_dict,
+            )
+        self.objp_template = self.charuco_board.getChessboardCorners().astype(np.float32)
 
         self.chess_flags = cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_NORMALIZE_IMAGE
         self.subpix_criteria = (
@@ -51,29 +69,31 @@ class BaseCalibrator:
         cap.release()
         return frames
 
-    def detect_chessboard_from_frame(self, args: Tuple) -> Optional[Tuple]:
-        """1フレームからチェスボードを検出"""
-        frame_idx, frame, pattern_size = args
+    def detect_charuco_from_frame(self, args: Tuple) -> Optional[Tuple]:
+        """1フレームからCharucoコーナーを検出"""
+        frame_idx, frame, _pattern_size = args
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-        ret_corners, corners = cv2.findChessboardCorners(
-            gray, pattern_size, flags=self.chess_flags
-        )
+        marker_corners, marker_ids, _ = cv2.aruco.detectMarkers(gray, self.aruco_dict)
+        if marker_ids is None or len(marker_ids) == 0:
+            return None
 
-        if ret_corners:
-            corners_refined = cv2.cornerSubPix(
-                gray, corners,
-                winSize=(11, 11),
-                zeroZone=(-1, -1),
-                criteria=self.subpix_criteria
-            )
-            return (
-                frame_idx,
-                self.objp_template.reshape(-1, 1, 3),
-                corners_refined,
-                gray.shape[::-1]
-            )
-        return None
+        ret_charuco, charuco_corners, charuco_ids = cv2.aruco.interpolateCornersCharuco(
+            markerCorners=marker_corners,
+            markerIds=marker_ids,
+            image=gray,
+            board=self.charuco_board,
+        )
+        if not ret_charuco or charuco_ids is None or len(charuco_ids) < 6:
+            return None
+
+        objp = self.objp_template[charuco_ids.flatten()].reshape(-1, 1, 3)
+        imgp = charuco_corners.reshape(-1, 1, 2)
+        return (frame_idx, objp, imgp, gray.shape[::-1])
+
+    def detect_chessboard_from_frame(self, args: Tuple) -> Optional[Tuple]:
+        """後方互換: 旧API名（内部はCharuco検出）"""
+        return self.detect_charuco_from_frame(args)
 
     def calibrate_chessboard(
         self,

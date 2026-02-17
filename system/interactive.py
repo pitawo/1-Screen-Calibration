@@ -14,7 +14,7 @@ from .fisheye_calibrator import FisheyeMethodJ
 from .utils import (
     get_video_info,
     progress_callback,
-    show_chessboard_preview,
+    show_charuco_preview,
     get_user_input,
     get_yes_no,
     DualLogger,
@@ -81,42 +81,48 @@ def interactive_mode_no_grid():
     lens_label = "魚眼レンズ" if is_fisheye else "通常レンズ"
     logger.log(f"\n選択: {lens_label}")
 
-    # === Step 3: チェスボードパラメータ ===
-    logger.log("\n【Step 3】チェスボードパラメータ")
+    # === Step 3: Charucoボードパラメータ ===
+    logger.log("\n【Step 3】Charucoボードパラメータ")
     logger.log("-" * 40)
-    logger.log("※ 交点の数を入力してください（マスの数 - 1）")
+    logger.log("※ ボードのマス数を入力してください")
 
-    rows = get_user_input("行数（交点数）", default="5", value_type=int)
-    logger.log(f"行数（交点数）: {rows}")
-    
-    cols = get_user_input("列数（交点数）", default="8", value_type=int)
-    logger.log(f"列数（交点数）: {cols}")
-    
-    square_size = get_user_input("マスのサイズ [m]", default="0.025", value_type=float)
+    rows = get_user_input("行数（マス数）", default="5", value_type=int)
+    logger.log(f"行数（マス数）: {rows}")
+
+    cols = get_user_input("列数（マス数）", default="7", value_type=int)
+    logger.log(f"列数（マス数）: {cols}")
+
+    square_size = get_user_input("マスのサイズ [m]", default="0.03", value_type=float)
     logger.log(f"マスのサイズ [m]: {square_size}")
 
-    logger.log(f"\n設定: {rows}行 x {cols}列, マスサイズ {square_size}m")
+    marker_size = get_user_input("ArUcoマーカーサイズ [m]", default="0.015", value_type=float)
+    logger.log(f"ArUcoマーカーサイズ [m]: {marker_size}")
 
-    # === Step 4: チェスボード検出プレビュー ===
-    logger.log("\n【Step 4】チェスボード検出プレビュー")
+    dictionary_name = get_user_input("ArUco辞書名", default="DICT_5X5_100", value_type=str)
+    logger.log(f"ArUco辞書名: {dictionary_name}")
+
+    logger.log(f"\n設定: {rows}行 x {cols}列, マス {square_size}m, マーカー {marker_size}m, 辞書 {dictionary_name}")
+
+    # === Step 4: Charucoボード検出プレビュー ===
+    logger.log("\n【Step 4】Charucoボード検出プレビュー")
     logger.log("-" * 40)
 
-    if get_yes_no("チェスボード検出プレビューを表示しますか？", default=True):
-        logger.log("チェスボード検出プレビューを表示しますか？: Yes")
+    if get_yes_no("Charucoボード検出プレビューを表示しますか？", default=True):
+        logger.log("Charucoボード検出プレビューを表示しますか？: Yes")
         # プレビュー画像の保存先（動画と同じディレクトリ）
         preview_output_dir = os.path.dirname(video_path) or "."
-        preview_ok = show_chessboard_preview(video_path, rows, cols, output_dir=preview_output_dir)
+        preview_ok = show_charuco_preview(video_path, rows, cols, square_size=square_size, marker_size=marker_size, dictionary_name=dictionary_name, output_dir=preview_output_dir)
 
         if not preview_ok:
-            if not get_yes_no("\nチェスボードが検出されませんでした。設定を変更しますか？", default=True):
-                logger.log("チェスボードが検出されませんでした。設定を変更しますか？: No")
+            if not get_yes_no("\nCharucoボードが検出されませんでした。設定を変更しますか？", default=True):
+                logger.log("Charucoボードが検出されませんでした。設定を変更しますか？: No")
                 logger.log("\n続行します。")
             else:
-                logger.log("チェスボードが検出されませんでした。設定を変更しますか？: Yes")
-                logger.log("\nキャンセルしました。行数・列数を確認してください。")
+                logger.log("Charucoボードが検出されませんでした。設定を変更しますか？: Yes")
+                logger.log("\nキャンセルしました。ボード設定を確認してください。")
                 return None
     else:
-        logger.log("チェスボード検出プレビューを表示しますか？: No")
+        logger.log("Charucoボード検出プレビューを表示しますか？: No")
 
     # === Step 5: キャリブレーションパラメータ ===
     logger.log("\n【Step 5】キャリブレーション設定")
@@ -166,9 +172,11 @@ def interactive_mode_no_grid():
     logger.log(f"  動画ファイル: {video_path}")
     logger.log("\n【レンズタイプ】")
     logger.log(f"  {lens_label}")
-    logger.log("\n【チェスボード】")
-    logger.log(f"  サイズ: {rows}行 x {cols}列（交点数）")
+    logger.log("\n【Charucoボード】")
+    logger.log(f"  サイズ: {rows}行 x {cols}列（マス数）")
     logger.log(f"  マスサイズ: {square_size} m")
+    logger.log(f"  マーカーサイズ: {marker_size} m")
+    logger.log(f"  辞書: {dictionary_name}")
     logger.log("\n【キャリブレーション設定】")
     logger.log(f"  目標フレーム数: {target_frame_count}")
     logger.log(f"  ブレ判定の厳しさ: {blur_threshold}")
@@ -198,6 +206,8 @@ def interactive_mode_no_grid():
             checkerboard_rows=rows,
             checkerboard_cols=cols,
             square_size=square_size,
+            marker_size=marker_size,
+            dictionary_name=dictionary_name,
             target_frame_count=target_frame_count,
             blur_threshold=blur_threshold,
             enable_k_center=enable_k_center,
@@ -209,6 +219,8 @@ def interactive_mode_no_grid():
             checkerboard_rows=rows,
             checkerboard_cols=cols,
             square_size=square_size,
+            marker_size=marker_size,
+            dictionary_name=dictionary_name,
             target_frame_count=target_frame_count,
             blur_threshold=blur_threshold,
             enable_k_center=enable_k_center,
@@ -283,5 +295,4 @@ def interactive_mode_no_grid():
     logger.log("=" * 60)
 
     return result
-
 

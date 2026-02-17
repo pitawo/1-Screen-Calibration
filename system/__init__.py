@@ -9,6 +9,7 @@ from .fisheye_calibrator import FisheyeCalibrator, FisheyeMethodJ
 from .utils import (
     get_video_info,
     progress_callback,
+    show_charuco_preview,
     show_chessboard_preview,
     get_user_input,
     get_yes_no,
@@ -23,6 +24,7 @@ __all__ = [
     'FisheyeMethodJ',
     'get_video_info',
     'progress_callback',
+    'show_charuco_preview',
     'show_chessboard_preview',
     'get_user_input',
     'get_yes_no',

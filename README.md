@@ -1,10 +1,10 @@
 # カメラキャリブレーションツール
 
-チェスボードパターンを使用した、高精度なカメラキャリブレーションツールです。
-通常レンズ・魚眼レンズ（GoPro等）の両方に対応しており、頑健なチェスボード検出と詳細なログ・結果出力が特徴です。
+Charucoボード（ChArUco）を使用した、高精度なカメラキャリブレーションツールです。
+通常レンズ・魚眼レンズ（GoPro等）の両方に対応しており、頑健なCharucoボード検出と詳細なログ・結果出力が特徴です。
 
 **主な特徴:**
-- **頑健なチェスボード検出**: ブレ、反射、照明変化に強い複数の検出アルゴリズムを搭載。
+- **頑健なCharucoボード検出**: ブレ、反射、照明変化に強い複数の検出アルゴリズムを搭載。
 - **統一されたログ出力**: ターミナル表示と全く同じ内容がログファイルに保存されます。
 - **人間が読める結果出力**: NPZファイルに加え、テキストファイルでも詳細なキャリブレーション結果を出力します。
 
@@ -13,7 +13,7 @@
 ## 必要な環境
 
 ```bash
-pip install opencv-python numpy
+pip install opencv-contrib-python numpy
 ```
 
 ---
@@ -37,7 +37,7 @@ pip install opencv-python numpy
 
 ## 1. カメラキャリブレーション (`run_calibration_no_grid.py`)
 
-チェスボードパターンを使用し、位置・角度・大きさのバランスが取れたフレームを自動選択して高精度なキャリブレーションを行います。
+Charucoボードを使用し、位置・角度・大きさのバランスが取れたフレームを自動選択して高精度なキャリブレーションを行います。
 
 ### 対話モード（引数なしで実行）
 
@@ -51,14 +51,14 @@ python run_calibration_no_grid.py
 ### コマンドラインモード
 
 ```bash
-# 通常レンズ（デフォルト設定: rows=5, cols=8, size=0.025）
+# 通常レンズ（デフォルト設定: rows=5, cols=7, square=0.03, marker=0.015, DICT_5X5_100）
 python run_calibration_no_grid.py 動画ファイル.mp4
 
 # 魚眼レンズ（GoPro等）
 python run_calibration_no_grid.py 動画ファイル.mp4 --fisheye
 
-# チェスボードパラメータを明示的に指定
-python run_calibration_no_grid.py 動画ファイル.mp4 --rows 5 --cols 8 --square_size 0.025
+# Charucoボードパラメータを明示的に指定
+python run_calibration_no_grid.py 動画ファイル.mp4 --rows 5 --cols 7 --square_size 0.03 --marker_size 0.015 --dictionary DICT_5X5_100
 ```
 
 ### オプション一覧
@@ -66,9 +66,11 @@ python run_calibration_no_grid.py 動画ファイル.mp4 --rows 5 --cols 8 --squ
 | オプション | 短縮形 | デフォルト | 説明 |
 |-----------|--------|-----------|------|
 | `--output_dir` | `-o` | `./output` | 出力ディレクトリ |
-| `--rows` | - | 5 | チェスボード行数（交点数）Note: マス数-1 |
-| `--cols` | - | 8 | チェスボード列数（交点数）Note: マス数-1 |
-| `--square_size` | - | 0.025 | マスのサイズ [m] |
+| `--rows` | - | 5 | Charucoボード行数（マス数） |
+| `--cols` | - | 7 | Charucoボード列数（マス数） |
+| `--square_size` | - | 0.03 | マスのサイズ [m] |
+| `--marker_size` | - | 0.015 | ArUcoマーカーサイズ [m] |
+| `--dictionary` | - | DICT_5X5_100 | ArUco辞書名 |
 | `--target_frames` | - | 200 | 目標フレーム数（150-300推奨） |
 | `--blur_threshold` | - | 120.0 | ブレ判定の厳しさ（高いほど厳しい） |
 | `--no_k_center` | - | - | フレーム自動補完を無効化 |
@@ -105,8 +107,10 @@ python run_calibration_no_grid.py 動画ファイル.mp4 --rows 5 --cols 8 --squ
 | `dist_coeffs` | ndarray | レンズ歪み補正値（通常レンズ: 5個、魚眼: 4個） |
 | `rms` | float | キャリブレーション誤差（小さいほど高精度） |
 | `image_size` | ndarray [w, h] | 画像の解像度 |
-| `board_shape` | ndarray [rows, cols] | チェスボードの交点数 |
-| `square_size` | float | チェスボードのマスサイズ (m) |
+| `board_shape` | ndarray [rows, cols] | Charucoボードのマス数 |
+| `square_size` | float | Charucoボードのマスサイズ (m) |
+| `marker_size` | float | ArUcoマーカーサイズ (m) |
+| `aruco_dictionary` | str | 使用したArUco辞書名 |
 | `calib_flags` | int | キャリブレーション時のフラグ |
 | `per_view_errors` | ndarray | フレームごとの誤差一覧 |
 | `calib_date` | str | キャリブレーション実行日 |
@@ -148,12 +152,12 @@ undistorted = cv2.undistort(frame, camera_matrix, dist_coeffs, None, data["new_c
 
 ## トラブルシューティング
 
-### チェスボードが検出されない
+### Charucoボードが検出されない
 - **新しい「頑健検出モード」により、以前より検出率は向上していますが、それでも検出されない場合:**
     - 照明を均一にする（強い影や白飛びを避ける）。
-    - チェスボードが画面内に完全に収まっている時間を増やす。
-    - `--rows` と `--cols` の値が正しいか再確認する（**交点の数**です。マスの数ではありません）。
+    - Charucoボードが画面内に完全に収まっている時間を増やす。
+    - `--rows` と `--cols` の値が正しいか再確認する（**マス数**を指定します）。
 
 ### 魚眼キャリブレーションが失敗する
-- チェスボードが極端に画面の端だけに映っているフレームが多いと失敗しやすいです。
-- 画面の中央付近にもチェスボードを映すようにしてください。
+- Charucoボードが極端に画面の端だけに映っているフレームが多いと失敗しやすいです。
+- 画面の中央付近にもCharucoボードを映すようにしてください。
