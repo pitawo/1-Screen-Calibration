@@ -13,7 +13,7 @@ import cv2
 import numpy as np
 
 from .base_calibrator import BaseCalibrator
-from .utils import find_chessboard_corners_robust, DualLogger
+from .utils import find_charuco_corners_robust, DualLogger
 
 
 class FisheyeCalibrator(BaseCalibrator):
@@ -23,9 +23,11 @@ class FisheyeCalibrator(BaseCalibrator):
         self,
         checkerboard_rows: int,
         checkerboard_cols: int,
-        square_size: float
+        square_size: float,
+        marker_size: float = 0.015,
+        dictionary_name: str = "DICT_5X5_100"
     ):
-        super().__init__(checkerboard_rows, checkerboard_cols, square_size)
+        super().__init__(checkerboard_rows, checkerboard_cols, square_size, marker_size, dictionary_name)
 
         # 魚眼キャリブレーション用フラグ
         self.fisheye_flags = (
@@ -97,7 +99,7 @@ class FisheyeCalibrator(BaseCalibrator):
             dst = img.reshape(-1, 2).astype(np.float64)
 
             try:
-                H, mask = cv2.findHomography(src, dst, method=0)
+                H, _mask = cv2.findHomography(src, dst, method=0)
             except cv2.error:
                 removed += 1
                 continue
@@ -440,13 +442,15 @@ class FisheyeMethodJ(FisheyeCalibrator):
         checkerboard_rows: int,
         checkerboard_cols: int,
         square_size: float,
+        marker_size: float = 0.015,
+        dictionary_name: str = "DICT_5X5_100",
         target_frame_count: int = 200,
         blur_threshold: float = 120.0,
         enable_k_center: bool = True,
         frame_skip: int = 1,
         logger: Optional[DualLogger] = None
     ):
-        super().__init__(checkerboard_rows, checkerboard_cols, square_size)
+        super().__init__(checkerboard_rows, checkerboard_cols, square_size, marker_size, dictionary_name)
         self.target_frame_count = target_frame_count
         self.blur_threshold = blur_threshold
         self.enable_k_center = enable_k_center
@@ -470,20 +474,18 @@ class FisheyeMethodJ(FisheyeCalibrator):
 
     def detect_and_evaluate_frame(self, args):
         """フレーム検出と評価（魚眼版: 2D特徴量ベース）"""
-        frame_idx, frame, pattern_size, img_width, img_height, img_diag = args
+        frame_idx, frame, img_width, img_height, img_diag = args
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
         blur_score = self._compute_blur_score(gray)
 
-        ret_corners, corners = find_chessboard_corners_robust(
-            gray, pattern_size, flags=self.chess_flags
+        ret_corners, corners_refined, corner_ids, _ = find_charuco_corners_robust(
+            gray, self.charuco_board, self.aruco_dict
         )
         if not ret_corners:
             return None
 
-        corners_refined = cv2.cornerSubPix(
-            gray, corners, (11, 11), (-1, -1), self.subpix_criteria
-        )
+        objp = self.objp_template[corner_ids.flatten()].reshape(-1, 1, 3)
 
         center_x = np.mean(corners_refined[:, 0, 0]) / img_width
         center_y = np.mean(corners_refined[:, 0, 1]) / img_height
@@ -510,8 +512,11 @@ class FisheyeMethodJ(FisheyeCalibrator):
 
         # 2. スラント（傾き）の簡易指標
         # 想定アスペクト比と観測アスペクト比の乖離を利用
-        expected_aspect = max(self.checkerboard_rows - 1, self.checkerboard_cols - 1) / \
-                          min(self.checkerboard_rows - 1, self.checkerboard_cols - 1)
+        min_board_side = min(self.checkerboard_rows - 1, self.checkerboard_cols - 1)
+        if min_board_side <= 0:
+            expected_aspect = 1.0
+        else:
+            expected_aspect = max(self.checkerboard_rows - 1, self.checkerboard_cols - 1) / min_board_side
         
         # 観測されたバウンディングボックスのアスペクト比
         w_rect, h_rect = rect[1]
@@ -524,8 +529,8 @@ class FisheyeMethodJ(FisheyeCalibrator):
 
         return {
             'frame_idx': frame_idx,
-            'objp': self.objp_template.reshape(-1, 1, 3),
-            'imgp': corners_refined,
+            'objp': objp,
+            'imgp': corners_refined.reshape(-1, 1, 2),
             'quality_score': quality_score,
             'blur_score': blur_score,
             'center_u': center_x,
@@ -538,7 +543,8 @@ class FisheyeMethodJ(FisheyeCalibrator):
             'tvec': None,
             'tilt_angle': None,
             'roll_angle': None,
-            'yaw_angle': None
+            'yaw_angle': None,
+            'charuco_corner_count': int(len(corner_ids))
         }
 
     def _k_center_greedy(self, features, k):
@@ -547,18 +553,28 @@ class FisheyeMethodJ(FisheyeCalibrator):
         if k >= n:
             return list(range(n))
 
-        centers = [np.random.randint(n)]
+        feature_center = np.mean(features, axis=0)
+        first_center = int(np.argmax(np.linalg.norm(features - feature_center, axis=1)))
+        centers = [first_center]
         distances = np.full(n, np.inf)
+        selected_mask = np.zeros(n, dtype=bool)
+        selected_mask[first_center] = True
+        distances[first_center] = -np.inf
 
         for _ in range(k - 1):
             last_center = features[centers[-1]]
-            for i in range(n):
-                if i not in centers:
-                    dist = np.linalg.norm(features[i] - last_center)
-                    distances[i] = min(distances[i], dist)
+            remaining_indices = np.where(~selected_mask)[0]
+            if len(remaining_indices) == 0:
+                break
 
-            next_center = np.argmax(distances)
+            candidate_vectors = features[remaining_indices]
+            dist_to_last = np.linalg.norm(candidate_vectors - last_center, axis=1)
+            distances[remaining_indices] = np.minimum(distances[remaining_indices], dist_to_last)
+
+            next_center = int(remaining_indices[np.argmax(distances[remaining_indices])])
             centers.append(next_center)
+            selected_mask[next_center] = True
+            distances[next_center] = -np.inf
 
         return centers
 
@@ -584,7 +600,6 @@ class FisheyeMethodJ(FisheyeCalibrator):
         cap.release()
 
         img_diag = math.sqrt(img_width**2 + img_height**2)
-        pattern_size = (self.checkerboard_cols, self.checkerboard_rows)
         img_size = (img_width, img_height)
 
         process_count = len(range(0, total_frames, self.frame_skip))
@@ -602,13 +617,14 @@ class FisheyeMethodJ(FisheyeCalibrator):
         all_detections = []
         cap = cv2.VideoCapture(video_path)
         processed = 0
-        for idx in range(0, total_frames, self.frame_skip):
-            cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+        for idx in range(total_frames):
             ret, frame = cap.read()
             if not ret:
                 break
+            if idx % self.frame_skip != 0:
+                continue
             result = self.detect_and_evaluate_frame(
-                (idx, frame, pattern_size, img_width, img_height, img_diag)
+                (idx, frame, img_width, img_height, img_diag)
             )
             if result is not None:
                 all_detections.append(result)
@@ -623,7 +639,7 @@ class FisheyeMethodJ(FisheyeCalibrator):
         self._log(f"ステップ1 所要時間: {t_step1_elapsed:.1f}秒")
 
         if len(all_detections) == 0:
-            raise ValueError("チェスボードが検出されたフレームがありません")
+            raise ValueError("Charucoボードが検出されたフレームがありません")
 
         # ブレ除外
         blur_scores = [d['blur_score'] for d in all_detections]
@@ -636,7 +652,7 @@ class FisheyeMethodJ(FisheyeCalibrator):
 
         if len(sharp_detections) == 0:
             self._log(f"警告: 指定されたブレ基準（{self.blur_threshold}）を満たすフレームがありませんが、")
-            self._log("チェスボード検出には成功しているため、検出された全フレームを使用します。（頑健検出モード）")
+            self._log("Charucoボード検出には成功しているため、検出された全フレームを使用します。（頑健検出モード）")
             sharp_detections = all_detections
             
         elif len(sharp_detections) < self.min_frames_per_bin * 5: # 極端に少ない場合も救済
@@ -647,7 +663,7 @@ class FisheyeMethodJ(FisheyeCalibrator):
         del all_detections  # メモリ解放
 
         if len(sharp_detections) == 0:
-            raise ValueError("チェスボードが検出できませんでした（検出数 0）")
+            raise ValueError("Charucoボードが検出できませんでした（検出数 0）")
 
         if progress_callback:
             progress_callback(f"{len(sharp_detections)}フレームがブレ判定を通過", 30)
@@ -913,6 +929,8 @@ class FisheyeMethodJ(FisheyeCalibrator):
             'image_size': np.array([w, h]),
             'board_shape': np.array([self.checkerboard_rows, self.checkerboard_cols]),
             'square_size': self.square_size,
+            'marker_size': self.marker_size,
+            'aruco_dictionary': self.dictionary_name,
             'calib_flags': int(self.fisheye_flags),
             'per_view_errors': pv_errs,
             'calib_date': datetime.datetime.now().strftime("%Y-%m-%d"),

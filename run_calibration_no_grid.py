@@ -19,7 +19,7 @@ def main():
 使用例:
   # 通常レンズ
   python run_calibration_no_grid.py video.mp4
-  python run_calibration_no_grid.py video.mp4 --rows 5 --cols 8 --square_size 0.025
+  python run_calibration_no_grid.py video.mp4 --rows 5 --cols 7 --square_size 0.03 --marker_size 0.015 --dictionary DICT_5X5_100
 
   # 魚眼レンズモード
   python run_calibration_no_grid.py video.mp4 --fisheye
@@ -39,11 +39,15 @@ def main():
                         default='./output',
                         help='出力ディレクトリ（デフォルト: ./output）')
     parser.add_argument('--rows', type=int, default=5,
-                        help='チェスボード行数（交点数）（デフォルト: 5）')
-    parser.add_argument('--cols', type=int, default=8,
-                        help='チェスボード列数（交点数）（デフォルト: 8）')
-    parser.add_argument('--square_size', type=float, default=0.025,
-                        help='マスのサイズ [m]（デフォルト: 0.025）')
+                        help='Charucoボード行数（マス数）（デフォルト: 5）')
+    parser.add_argument('--cols', type=int, default=7,
+                        help='Charucoボード列数（マス数）（デフォルト: 7）')
+    parser.add_argument('--square_size', type=float, default=0.03,
+                        help='マスのサイズ [m]（デフォルト: 0.03）')
+    parser.add_argument('--marker_size', type=float, default=0.015,
+                        help='ArUcoマーカーサイズ [m]（デフォルト: 0.015）')
+    parser.add_argument('--dictionary', default='DICT_5X5_100',
+                        help='ArUco辞書名（デフォルト: DICT_5X5_100）')
     parser.add_argument('--target_frames', type=int, default=200,
                         help='目標フレーム数（デフォルト: 200）')
     parser.add_argument('--blur_threshold', type=float, default=120.0,
@@ -64,7 +68,7 @@ def main():
         FisheyeMethodJ,
         get_video_info,
         progress_callback,
-        show_chessboard_preview,
+        show_charuco_preview,
         get_yes_no,
         DualLogger,
     )
@@ -83,7 +87,7 @@ def main():
     # プレビュー
     if args.preview:
         preview_output_dir = os.path.dirname(args.video) or "."
-        show_chessboard_preview(args.video, args.rows, args.cols, output_dir=preview_output_dir)
+        show_charuco_preview(args.video, args.rows, args.cols, square_size=args.square_size, marker_size=args.marker_size, dictionary_name=args.dictionary, output_dir=preview_output_dir)
         if not get_yes_no("\nキャリブレーションを続行しますか？", default=True):
             logger.log("キャンセルしました。")
             sys.exit(0)
@@ -104,10 +108,12 @@ def main():
     logger.log(f"  FPS: {video_info['fps']:.2f}")
     logger.log(f"  フレーム数: {video_info['frame_count']}")
 
-    logger.log("\nチェスボードパラメータ:")
-    logger.log(f"  行数（交点）: {args.rows}")
-    logger.log(f"  列数（交点）: {args.cols}")
+    logger.log("\nCharucoボードパラメータ:")
+    logger.log(f"  行数（マス）: {args.rows}")
+    logger.log(f"  列数（マス）: {args.cols}")
     logger.log(f"  マスサイズ: {args.square_size} m")
+    logger.log(f"  マーカーサイズ: {args.marker_size} m")
+    logger.log(f"  辞書: {args.dictionary}")
 
     logger.log("\nキャリブレーションパラメータ:")
     logger.log(f"  レンズタイプ: {lens_label}")
@@ -125,6 +131,8 @@ def main():
             checkerboard_rows=args.rows,
             checkerboard_cols=args.cols,
             square_size=args.square_size,
+            marker_size=args.marker_size,
+            dictionary_name=args.dictionary,
             target_frame_count=args.target_frames,
             blur_threshold=args.blur_threshold,
             enable_k_center=not args.no_k_center,
@@ -136,6 +144,8 @@ def main():
             checkerboard_rows=args.rows,
             checkerboard_cols=args.cols,
             square_size=args.square_size,
+            marker_size=args.marker_size,
+            dictionary_name=args.dictionary,
             target_frame_count=args.target_frames,
             blur_threshold=args.blur_threshold,
             enable_k_center=not args.no_k_center,

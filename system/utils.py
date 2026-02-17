@@ -8,7 +8,7 @@ import numpy as np
 from datetime import datetime as dt
 
 
-# ガンマ補正LUT（find_chessboard_corners_robust内で再利用）
+# ガンマ補正LUT（find_charuco_corners_robust内で再利用）
 _GAMMA = 1.5
 _INV_GAMMA = 1.0 / _GAMMA
 _GAMMA_LUT = np.array(
@@ -39,14 +39,14 @@ def progress_callback(message, progress_percent=None):
         print(f"[{timestamp}] {message}")
 
 
-def show_chessboard_preview(video_path: str, rows: int, cols: int, output_dir: str = None) -> bool:
+def show_charuco_preview(video_path: str, rows: int, cols: int, square_size: float = 0.03, marker_size: float = 0.015, dictionary_name: str = "DICT_5X5_100", output_dir: str = None) -> bool:
     """
-    チェスボード検出プレビュー（画像ファイル保存方式）
+    Charucoボード検出プレビュー（画像ファイル保存方式）
 
     Args:
         video_path: 動画ファイルのパス
-        rows: チェスボード行数（交点数）
-        cols: チェスボード列数（交点数）
+        rows: Charucoボード行数（マス数）
+        cols: Charucoボード列数（マス数）
         output_dir: プレビュー画像の保存先
 
     Returns:
@@ -58,11 +58,23 @@ def show_chessboard_preview(video_path: str, rows: int, cols: int, output_dir: s
         return False
 
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    pattern_size = (cols, rows)
-    chess_flags = cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_NORMALIZE_IMAGE
+    if not hasattr(cv2, "aruco"):
+        cap.release()
+        print("エラー: OpenCV ArUco モジュールが利用できません")
+        return False
+    if not hasattr(cv2.aruco, dictionary_name):
+        cap.release()
+        print(f"エラー: 未対応の辞書 {dictionary_name}")
+        return False
+
+    aruco_dict = cv2.aruco.getPredefinedDictionary(getattr(cv2.aruco, dictionary_name))
+    if hasattr(cv2.aruco, "CharucoBoard"):
+        board = cv2.aruco.CharucoBoard((cols, rows), square_size, marker_size, aruco_dict)
+    else:
+        board = cv2.aruco.CharucoBoard_create(cols, rows, square_size, marker_size, aruco_dict)
 
     print("\n" + "=" * 60)
-    print("チェスボード検出プレビュー")
+    print("Charucoボード検出プレビュー")
     print("=" * 60)
 
     # 保存先ディレクトリ
@@ -87,7 +99,7 @@ def show_chessboard_preview(video_path: str, rows: int, cols: int, output_dir: s
             continue
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        ret_corners, corners = cv2.findChessboardCorners(gray, pattern_size, flags=chess_flags)
+        ret_corners, corners, ids, marker_corners = find_charuco_corners_robust(gray, board, aruco_dict)
 
         display_frame = frame.copy()
 
@@ -96,11 +108,11 @@ def show_chessboard_preview(video_path: str, rows: int, cols: int, output_dir: s
         blur_score = laplacian.var()
 
         if ret_corners:
-            subpix_criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 80, 1e-4)
-            corners_refined = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), subpix_criteria)
-            cv2.drawChessboardCorners(display_frame, pattern_size, corners_refined, ret_corners)
+            if ids is not None and marker_corners is not None:
+                cv2.aruco.drawDetectedMarkers(display_frame, marker_corners, ids)
+            cv2.aruco.drawDetectedCornersCharuco(display_frame, corners, ids, (255, 0, 0))
 
-            status_text = f"DETECTED | Blur: {blur_score:.1f}"
+            status_text = f"DETECTED | Charuco: {len(ids)} | Blur: {blur_score:.1f}"
             cv2.putText(display_frame, status_text, (10, 30),
                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
             detected_count += 1
@@ -131,9 +143,9 @@ def show_chessboard_preview(video_path: str, rows: int, cols: int, output_dir: s
     print("-" * 40)
 
     if detected_count == 0:
-        print("\n警告: サンプルフレームでチェスボードが検出されませんでした。")
-        print("  - チェスボードのサイズ（行数・列数）が正しいか確認してください")
-        print("  - 動画内にチェスボードが映っているか確認してください")
+        print("\n警告: サンプルフレームでCharucoボードが検出されませんでした。")
+        print("  - ボードの行数・列数・サイズ・辞書設定が正しいか確認してください")
+        print("  - 動画内にCharucoボードが映っているか確認してください")
 
     return detected_count > 0
 
@@ -215,53 +227,36 @@ class DualLogger:
         return self.log_buffer
 
 
-def find_chessboard_corners_robust(gray_image, pattern_size, flags=None):
-    """
-    ロバストなチェスボード検出（ピンボケ・反射・照明ムラに対応）
-    
-    Args:
-        gray_image: グレースケール画像
-        pattern_size: (cols, rows)
-        flags: cv2.findChessboardCorners のフラグ
-        
-    Returns:
-        ret (bool): 検出成功か
-        corners (np.ndarray): 検出されたコーナー座標
-    """
-    if flags is None:
-        flags = cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_NORMALIZE_IMAGE
+def find_charuco_corners_robust(gray_image, charuco_board, aruco_dict, detector_params=None, min_corners=6):
+    """ロバストなCharucoコーナー検出"""
+    if detector_params is None:
+        if hasattr(cv2.aruco, "DetectorParameters"):
+            detector_params = cv2.aruco.DetectorParameters()
+        else:
+            detector_params = cv2.aruco.DetectorParameters_create()
 
-    # 1. Sector-Based Method (最もロバスト)
-    # 多くのノイズ、ピンボケ、複雑な背景に強い
-    sb_flags = cv2.CALIB_CB_EXHAUSTIVE | cv2.CALIB_CB_ACCURACY
-    ret, corners = cv2.findChessboardCornersSB(gray_image, pattern_size, flags=sb_flags)
-    if ret:
-        return True, corners
-
-    # 2. 通常の検出（標準API）
-    ret, corners = cv2.findChessboardCorners(gray_image, pattern_size, flags=flags)
-    if ret:
-        return True, corners
-
-    # 3. CLAHE (Contrast Limited Adaptive Histogram Equalization)
-    # 反射や照明ムラに強い
+    candidate_images = [gray_image]
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    gray_clahe = clahe.apply(gray_image)
-    
-    ret, corners = cv2.findChessboardCorners(gray_clahe, pattern_size, flags=flags)
-    if ret:
-        return True, corners
-        
-    # Sector-Based も CLAHE 画像で試行
-    ret, corners = cv2.findChessboardCornersSB(gray_clahe, pattern_size, flags=sb_flags)
-    if ret:
-        return True, corners
+    candidate_images.append(clahe.apply(gray_image))
+    candidate_images.append(cv2.LUT(gray_image, _GAMMA_LUT))
 
-    # 4. ガンマ補正（暗い/明るすぎる場合）
-    gray_gamma = cv2.LUT(gray_image, _GAMMA_LUT)
-    
-    ret, corners = cv2.findChessboardCorners(gray_gamma, pattern_size, flags=flags)
-    if ret:
-        return True, corners
+    for candidate in candidate_images:
+        marker_corners, marker_ids, _ = cv2.aruco.detectMarkers(candidate, aruco_dict, parameters=detector_params)
+        if marker_ids is None or len(marker_ids) == 0:
+            continue
 
-    return False, None
+        ret_charuco, charuco_corners, charuco_ids = cv2.aruco.interpolateCornersCharuco(
+            markerCorners=marker_corners,
+            markerIds=marker_ids,
+            image=candidate,
+            board=charuco_board,
+        )
+        if ret_charuco and charuco_ids is not None and len(charuco_ids) >= min_corners:
+            return True, charuco_corners, charuco_ids, marker_corners
+
+    return False, None, None, None
+
+
+def show_chessboard_preview(*args, **kwargs):
+    """後方互換: 旧API名"""
+    return show_charuco_preview(*args, **kwargs)
