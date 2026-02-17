@@ -19,7 +19,7 @@ def main():
 使用例:
   # 通常レンズ
   python run_calibration_no_grid.py video.mp4
-  python run_calibration_no_grid.py video.mp4 --rows 5 --cols 7 --square_size 0.03 --marker_size 0.015 --dictionary DICT_5X5_100
+  python run_calibration_no_grid.py video.mp4 --rows 7 --cols 5 --square_size 0.03 --marker_size 0.015 --dictionary DICT_5X5_100
 
   # 魚眼レンズモード
   python run_calibration_no_grid.py video.mp4 --fisheye
@@ -38,10 +38,10 @@ def main():
     parser.add_argument('--output_dir', '-o',
                         default='./output',
                         help='出力ディレクトリ（デフォルト: ./output）')
-    parser.add_argument('--rows', type=int, default=5,
-                        help='Charucoボード行数（マス数）（デフォルト: 5）')
-    parser.add_argument('--cols', type=int, default=7,
-                        help='Charucoボード列数（マス数）（デフォルト: 7）')
+    parser.add_argument('--rows', type=int, default=7,
+                        help='Charucoボード行数（マス数）（デフォルト: 7）')
+    parser.add_argument('--cols', type=int, default=5,
+                        help='Charucoボード列数（マス数）（デフォルト: 5）')
     parser.add_argument('--square_size', type=float, default=0.03,
                         help='マスのサイズ [m]（デフォルト: 0.03）')
     parser.add_argument('--marker_size', type=float, default=0.015,
