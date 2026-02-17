@@ -219,7 +219,7 @@ class MethodJ_GeometricDiversity(BaseCalibrator):
         """キャリブレーション実行（メモリ効率化版: フレームを1枚ずつ処理）"""
         self.process_log = []
         self._log("=" * 60)
-        self._log("高精度自動キャリブレーション 開始")
+        self._log("キャリブレーション 開始")
         self._log("=" * 60)
 
         if progress_callback:
@@ -299,13 +299,13 @@ class MethodJ_GeometricDiversity(BaseCalibrator):
 
         if len(sharp_detections) == 0:
             self._log(f"警告: 指定されたブレ基準（{self.blur_threshold}）を満たすフレームがありませんが、")
-            self._log(f"チェスボード検出には成功しているため、検出された全フレームを使用します。（頑健検出モード）")
+            self._log("チェスボード検出には成功しているため、検出された全フレームを使用します。（頑健検出モード）")
             sharp_detections = all_detections
             effective_blur_threshold = float(np.min(blur_scores))
             
         elif len(sharp_detections) < self.min_frames_per_bin * 5: # 極端に少ない場合も救済
              self._log(f"警告: ブレ基準を満たすフレームが少なすぎます（{len(sharp_detections)}枚）。")
-             self._log(f"検出された全フレームを候補として使用します。")
+             self._log("検出された全フレームを候補として使用します。")
              sharp_detections = all_detections
              effective_blur_threshold = float(np.min(blur_scores))
 
@@ -333,8 +333,8 @@ class MethodJ_GeometricDiversity(BaseCalibrator):
         if progress_callback:
             progress_callback(f"{len(sharp_detections)}フレームがブレ判定を通過", 30)
 
-        # ステップ5: フレーム選択（2D特徴量 + k-center法）
-        self._log("--- ステップ5: フレーム選択（2D特徴量 + k-center法） ---")
+        # ステップ2: フレーム選択（2D特徴量 + k-center法）
+        self._log("--- ステップ2: フレーム選択（2D特徴量 + k-center法） ---")
         if progress_callback:
             progress_callback("フレーム選択中...", 40)
 
@@ -372,8 +372,8 @@ class MethodJ_GeometricDiversity(BaseCalibrator):
         bin_counts = {'all': selected_frames}
 
 
-        # ステップ6: 最終キャリブレーション
-        self._log("--- ステップ6: 最終キャリブレーション ---")
+        # ステップ3: 最終キャリブレーション
+        self._log("--- ステップ3: 最終キャリブレーション ---")
         if progress_callback:
             progress_callback("最終キャリブレーション実行中...", 50)
 
@@ -395,13 +395,44 @@ class MethodJ_GeometricDiversity(BaseCalibrator):
                                  selected_frames, bin_counts, blur_threshold_used):
         """最終キャリブレーション処理"""
         # キャリブレーション用フレーム数を制限（大量フレームで極端に遅くなるため）
+        # 単純な等間隔抽出だけだと高品質フレームを取りこぼす可能性があるため、
+        # 品質優先 + 時間方向の分散を両立するサンプリングにする。
         max_calib_frames = 80
         if len(objpoints) > max_calib_frames:
-            step = len(objpoints) / max_calib_frames
-            indices = [int(i * step) for i in range(max_calib_frames)]
+            quality_ratio = 0.7
+            quality_count = int(max_calib_frames * quality_ratio)
+            diversity_count = max_calib_frames - quality_count
+
+            scored = list(enumerate(selected_frames))
+            top_quality = sorted(
+                scored,
+                key=lambda x: x[1].get('quality_score', 0.0),
+                reverse=True
+            )[:quality_count]
+            selected_idx_set = {idx for idx, _ in top_quality}
+
+            if diversity_count > 0:
+                step = len(objpoints) / diversity_count
+                uniform_indices = [min(int(i * step), len(objpoints) - 1) for i in range(diversity_count)]
+                selected_idx_set.update(uniform_indices)
+
+            indices = sorted(selected_idx_set)
+            if len(indices) > max_calib_frames:
+                indices = indices[:max_calib_frames]
+            elif len(indices) < max_calib_frames:
+                for idx in range(len(objpoints)):
+                    if idx not in selected_idx_set:
+                        indices.append(idx)
+                        if len(indices) == max_calib_frames:
+                            break
+
             calib_obj = [objpoints[i] for i in indices]
             calib_img = [imgpoints[i] for i in indices]
-            self._log(f"最終キャリブレーション実行（{len(objpoints)}フレーム中{len(calib_obj)}枚を使用）")
+            self._log(f"最終キャリブレーション実行（候補{len(objpoints)}フレーム、上限{max_calib_frames}枚）")
+            self._log(
+                f"採用基準: 計算時間と安定性のバランスのため最大{max_calib_frames}枚。"
+                f"超過時は品質上位{quality_count}枚 + 時系列の均等サンプル{len(calib_obj)-quality_count}枚を併用"
+            )
         else:
             calib_obj = objpoints
             calib_img = imgpoints

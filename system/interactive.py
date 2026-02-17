@@ -41,7 +41,7 @@ def interactive_mode_no_grid():
 
     while True:
         video_path = input("動画ファイルのパスを入力してください: ").strip()
-        logger.log(f"動画ファイルのパスを入力してください: {video_path}") # 入力もログに記録
+        logger.log(f"入力された動画ファイル: {video_path}")  # 入力値をログに記録
 
         # 引用符を除去
         video_path = video_path.strip('"').strip("'")
@@ -58,7 +58,7 @@ def interactive_mode_no_grid():
 
     # 動画情報表示
     video_info = get_video_info(video_path)
-    logger.log(f"\n動画情報:")
+    logger.log("\n動画情報:")
     logger.log(f"  ファイル: {os.path.basename(video_path)}")
     logger.log(f"  解像度: {video_info['width']}x{video_info['height']}")
     logger.log(f"  FPS: {video_info['fps']:.2f}")
@@ -162,22 +162,22 @@ def interactive_mode_no_grid():
     logger.log("\n" + "=" * 60)
     logger.log("設定内容の確認")
     logger.log("=" * 60)
-    logger.log(f"\n【入力】")
+    logger.log("\n【入力】")
     logger.log(f"  動画ファイル: {video_path}")
-    logger.log(f"\n【レンズタイプ】")
+    logger.log("\n【レンズタイプ】")
     logger.log(f"  {lens_label}")
-    logger.log(f"\n【チェスボード】")
+    logger.log("\n【チェスボード】")
     logger.log(f"  サイズ: {rows}行 x {cols}列（交点数）")
     logger.log(f"  マスサイズ: {square_size} m")
-    logger.log(f"\n【キャリブレーション設定】")
+    logger.log("\n【キャリブレーション設定】")
     logger.log(f"  目標フレーム数: {target_frame_count}")
     logger.log(f"  ブレ判定の厳しさ: {blur_threshold}")
-    logger.log(f"  画面分割: 分割なし")
+    logger.log("  画面分割: 分割なし")
 
 
-    logger.log(f"\n【その他】")
-    logger.log(f"  フレーム間引き: {frame_skip}{'（全フレーム処理）' if frame_skip == 1 else f'フレームおき'}")
-    logger.log(f"\n【出力先】")
+    logger.log("\n【その他】")
+    logger.log(f"  フレーム間引き: {frame_skip}{'（全フレーム処理）' if frame_skip == 1 else 'フレームおき'}")
+    logger.log("\n【出力先】")
     logger.log(f"  {output_dir}")
 
     if not get_yes_no("\nこの設定でキャリブレーションを実行しますか？", default=True):
@@ -245,16 +245,16 @@ def interactive_mode_no_grid():
     logger.log("\n" + "=" * 60)
     logger.log(f"キャリブレーション完了！（{lens_label}・分割なし）")
     logger.log("=" * 60)
-    logger.log(f"\n結果:")
+    logger.log("\n結果:")
     logger.log(f"  誤差（小さいほど高精度）: {result['rms']:.4f}")
     logger.log(f"  使用フレーム数: {len(result['per_view_errors'])}")
     logger.log(f"  処理時間: {elapsed_time:.2f}秒")
     logger.log(f"  95%タイル誤差（大半のフレームの誤差上限）: {np.percentile(result['per_view_errors'], 95):.4f}")
 
-    logger.log(f"\nカメラ内部パラメータ:")
+    logger.log("\nカメラ内部パラメータ:")
     logger.log(str(result['camera_matrix']))
 
-    logger.log(f"\nレンズ歪み補正値:")
+    logger.log("\nレンズ歪み補正値:")
     logger.log(str(result['dist_coeffs']))
     if is_fisheye:
         logger.log("  ※ 魚眼モデル（4パラメータ）")
@@ -267,7 +267,7 @@ def interactive_mode_no_grid():
     npz_filename = f"{prefix}_{timestamp}.npz"
     npz_path = os.path.join(output_dir, npz_filename)
     calibrator.save_calibration(result, npz_path)
-    logger.log(f"\n保存しました:")
+    logger.log("\n保存しました:")
     logger.log(f"  キャリブレーションファイル: {npz_path}")
     logger.log(f"  テキスト形式レポート: {npz_path.replace('.npz', '_result.txt')}")
 
@@ -283,6 +283,5 @@ def interactive_mode_no_grid():
     logger.log("=" * 60)
 
     return result
-
 
 
